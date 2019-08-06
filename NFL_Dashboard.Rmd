@@ -1,0 +1,127 @@
+---
+title: "NFL Passer Stats for 2009 to 2018"
+author: "Wilmer Tejada"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+runtime: shiny
+---
+
+
+```{r global, include=FALSE}
+# load data in 'global' chunk so it can be shared by all users of the dashboard
+library(tidyverse)
+library(lubridate)
+library(plotly)
+pbp_data = read_csv("NFL_pbp_data.csv")
+pbp_data$Season = as.character(pbp_data$Season)
+```
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+
+```{r}
+titlePanel("TDs")
+
+selectInput("Team",
+            "Select Team:",
+            choices = unique(pbp_data$posteam),
+            selected = "NE" )
+selectInput("Passer",
+            "Select Passer:",
+            choices = unique(pbp_data$Passer),
+            selected = "T.Brady")
+checkboxGroupInput("Season",
+                   "Select Season:",
+                   choices = unique(pbp_data$Season),
+                   selected = unique(pbp_data$Season))
+
+```
+
+Data was gathered using the `nflscrapR` library.
+
+```{r}
+observeEvent(input$Team, {
+     Team <- input$Team
+
+  updateSelectInput(session, "Passer",
+      choices = pbp_data %>% filter(posteam == input$Team) %>%
+        select(Passer) %>%
+        na.omit(unique())
+    )
+
+})
+
+
+dataset1 <- reactive({
+  pbp_data_tidy = pbp_data %>%
+            filter(Touchdown == 1) %>%
+            filter(posteam == input$Team) %>%
+            filter(Passer == input$Passer) %>%
+            filter(Season %in% input$Season) %>%
+            group_by(Passer,Receiver,Season,PassLength) %>%
+            summarise(n=n()) %>%
+            na.omit()
+})
+
+dataset2 <- reactive({
+  csum = pbp_data %>%
+           filter(Touchdown == 1) %>%
+            filter(posteam == input$Team) %>%
+            filter(Passer == input$Passer) %>%
+            filter(Season %in% input$Season) %>%
+            group_by(Season) %>%
+            summarise(n=n()) %>%
+            ungroup()%>%
+            mutate(cumulative = cumsum(n)) 
+})
+```
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### List of Receivers {data-width=300}
+
+```{r}
+renderTable({
+  dataset1() %>% 
+    select(Receiver,n) %>%
+    group_by(Receiver) %>%
+    summarise(Touchdowns = sum(n)) %>%
+    arrange(desc(Touchdowns))
+})
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Cumulative Touchdowns by Passer {data-height=200}
+
+```{r}
+
+renderPlotly({
+        
+        plot_ly(dataset2(), x = ~Season, y = ~cumulative, type = 'scatter', mode = 'lines')
+            })
+```
+
+### Touchdowns by Season 
+
+```{r}
+
+renderPlotly({
+      dataset1 () %>%
+          group_by(Season,PassLength) %>%
+          summarise(TD = sum(n)) %>%
+          spread(PassLength,TD) %>%
+          plot_ly() %>%
+          add_trace(x = ~Season, y = ~Deep, type = 'bar', name = 'Deep',
+                    text = ~Deep, textposition = 'auto') %>%
+          add_trace(x= ~Season, y = ~Short, type = 'bar',name = 'Short',
+                      text = ~Short, textposition = 'auto') %>%
+          layout(barmode = 'stack')
+
+            })
+```
+
